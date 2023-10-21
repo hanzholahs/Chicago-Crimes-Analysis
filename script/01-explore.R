@@ -12,7 +12,7 @@ temp <- tempdir()
 unzip("./data/crimes.zip", exdir = temp)
 
 column_names <- c("ID", "Date", "IUCR", "Primary Type","Description",
-                  "Location Description", "Arrest", "Domestic",
+                  "Location Description", "Arrest", "Domestic", "Beat",
                   "District", "Community Area")
 
 
@@ -29,7 +29,8 @@ crimes <-
          description = as.factor(description),
          location_description = as.factor(location_description),
          community_area = as.factor(community_area),
-         district = as.factor(district)) |> 
+         district = str_pad(district, 3, "left", "0") |>  as.factor(),
+         beat = str_pad(beat, 4, "left", "0") |>  as.factor()) |> 
   arrange(id)
 
 number_of_days <- 
@@ -157,3 +158,66 @@ crimes |>
   pivot_wider(id_cols = year, names_from = arrest, values_from = prop) |> 
   janitor::clean_names()
 
+
+
+# Maps --------------------------------------------------------------------
+
+shape_districts <-
+  fs::dir_ls("./shape/police-districts", glob = "*.shp") |> 
+  sf::st_read(quiet = TRUE) |> 
+  mutate(dist_num = str_pad(dist_num, 3, "left", "0"))
+
+ggplot(shape_districts) +
+  geom_sf(fill = "#778833", colour = "#778800", alpha = 0.5)
+
+shape_districts |> 
+  distinct(district = dist_num) |> 
+  mutate(district = str_pad(district, 3, "left", "0")) |> 
+  arrange(district) |> 
+  mutate(source = "Shape") |> 
+  full_join(
+    crimes |> distinct(district) |> arrange(district) |> mutate(source = "Crimes"),
+    by = "district"
+  ) |> 
+  filter(!is.na(district), is.na(source.x) | is.na(source.y))
+
+crimes |> 
+  group_by(year = year(date), district) |> 
+  filter(year %in% seq(2001, 2023, 2)) |>
+  summarise(n = n()) |> 
+  mutate(district = str_pad(district, 3, "left", "0")) |> 
+  ungroup() |> 
+  inner_join(shape_districts, by = c("district" = "dist_num")) |> 
+  ggplot() +
+  geom_sf(aes(fill = n, geometry = geometry)) +
+  facet_wrap(~ year, ncol = 4)
+
+
+
+
+shape_beats <-
+  fs::dir_ls("./shape/police-beats", glob = "*.shp") |> 
+  sf::st_read(quiet = TRUE)
+
+ggplot(shape_beats) +
+  geom_sf(fill = "#337788", colour = "#228877", alpha = 0.5)
+
+shape_beats |> 
+  distinct(beat = beat_num) |> 
+  arrange(beat) |> 
+  mutate(source = "Shape") |> 
+  full_join(
+    crimes |> distinct(beat) |> arrange(beat) |> mutate(source = "Crimes"),
+    by = "beat"
+  ) |> 
+  filter(is.na(source.x) | is.na(source.y))
+
+crimes |> 
+  group_by(year = year(date), beat) |> 
+  filter(year %in% seq(2001, 2023, 2)) |>
+  summarise(n = n()) |> 
+  ungroup() |> 
+  inner_join(shape_beats, by = c("beat" = "beat_num")) |> 
+  ggplot() +
+  geom_sf(aes(fill = n, geometry = geometry)) +
+  facet_wrap(~ year, ncol = 4)
